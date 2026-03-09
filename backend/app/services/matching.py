@@ -9,6 +9,7 @@ from app.models.query import Query
 from app.models.match import Match, MatchQuery
 from app.models.chat import Chatroom, ChatroomMember
 from app.services.llm import evaluate_candidates
+from app.agents.notifications import notify_match_found
 
 
 async def find_candidates(db: AsyncSession, query: Query) -> list[Query]:
@@ -151,6 +152,11 @@ async def run_matching_pipeline(db: AsyncSession, query: Query):
                 await db.flush()
                 db.add(MatchQuery(match_id=match.id, query_id=query.id))
                 db.add(MatchQuery(match_id=match.id, query_id=candidate.id))
+
+                # Notify both users
+                await notify_match_found(db, query.user_id, match.id, candidate.raw_text, result["score"])
+                await notify_match_found(db, candidate.user_id, match.id, query.raw_text, result["score"])
+
                 await db.commit()
             matches_created += 1
 

@@ -12,6 +12,7 @@ from app.models.query import Query
 from app.schemas.match import MatchResponse
 from app.services.auth import get_current_user
 from app.services.matching import accept_match
+from app.agents.notifications import notify_match_accepted, notify_match_rejected
 
 router = APIRouter(prefix="/api/matches", tags=["matches"])
 
@@ -58,8 +59,19 @@ async def accept(
     if not user_query_ids:
         raise HTTPException(status_code=403, detail="Not your match")
 
-    await accept_match(db, match)
+    chatroom = await accept_match(db, match)
     await db.refresh(match, ["match_queries"])
+
+    # Notify other users in the match
+    for mq in match.match_queries:
+        if mq.query.user_id != user.id:
+            await notify_match_accepted(
+                db, mq.query.user_id, match.id,
+                match.chatroom_id or (chatroom.id if chatroom else None),
+                user.display_name,
+            )
+    await db.commit()
+
     return match
 
 
@@ -84,5 +96,11 @@ async def reject(
         raise HTTPException(status_code=403, detail="Not your match")
 
     match.status = "rejected"
+
+    # Notify other users
+    for mq in match.match_queries:
+        if mq.query.user_id != user.id:
+            await notify_match_rejected(db, mq.query.user_id, match.id)
+
     await db.commit()
     return match

@@ -70,6 +70,10 @@ class ConnectionManager:
         """Background task: poll Redis for messages and deliver to local WS connections."""
         while True:
             try:
+                # No subscriptions yet — wait until a room is connected
+                if not self._local:
+                    await asyncio.sleep(0.5)
+                    continue
                 msg = await self._pubsub.get_message(
                     ignore_subscribe_messages=True, timeout=0.5
                 )

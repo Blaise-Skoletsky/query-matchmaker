@@ -72,5 +72,44 @@ export const api = {
 	},
 	getMessages(chatroomId: string) {
 		return request<any[]>(`/api/chatrooms/${chatroomId}/messages`);
+	},
+
+	// Notifications
+	listNotifications(unreadOnly = false) {
+		const params = unreadOnly ? '?unread_only=true' : '';
+		return request<any[]>(`/api/notifications${params}`);
+	},
+	notificationCount() {
+		return request<{ unread: number; total: number }>('/api/notifications/count');
+	},
+	markNotificationRead(id: string) {
+		return request<any>(`/api/notifications/${id}/read`, { method: 'POST' });
+	},
+	markAllNotificationsRead() {
+		return request<void>('/api/notifications/read-all', { method: 'POST' });
+	},
+
+	// Recommendations
+	getSimilarQueries(limit = 5) {
+		return request<any[]>(`/api/recommendations/similar?limit=${limit}`);
+	},
+	getTrending(limit = 10) {
+		return request<any[]>(`/api/recommendations/trending?limit=${limit}`);
+	},
+	getDemandGaps(limit = 5) {
+		return request<any[]>(`/api/recommendations/demand-gaps?limit=${limit}`);
+	},
+
+	// Analytics
+	getAnalyticsLatest() {
+		return request<any>('/api/analytics/latest');
+	},
+	getAnalyticsSnapshots(limit = 30) {
+		return request<any[]>(`/api/analytics/snapshots?limit=${limit}`);
+	},
+
+	// Agent status
+	getAgentStatus() {
+		return request<{ agents: any[] }>('/api/agents/status');
 	}
 };

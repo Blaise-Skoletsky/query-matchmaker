@@ -20,3 +20,4 @@ class User(Base):
     queries = relationship("Query", back_populates="user")
     chatroom_memberships = relationship("ChatroomMember", back_populates="user")
     messages = relationship("Message", back_populates="user")
+    notifications = relationship("Notification", back_populates="user")

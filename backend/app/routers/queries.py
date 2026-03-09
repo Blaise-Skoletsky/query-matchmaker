@@ -12,6 +12,7 @@ from app.services.auth import get_current_user
 from app.services.embedding import embed_async
 from app.services.llm import extract_metadata
 from app.services.matching import run_matching_pipeline
+from app.agents.moderation import moderate_query
 
 router = APIRouter(prefix="/api/queries", tags=["queries"])
 
@@ -56,6 +57,14 @@ async def create_query(
     db.add(query)
     await db.commit()
     await db.refresh(query)
+
+    # Inline moderation check before matching
+    mod_log = await moderate_query(db, query)
+    await db.commit()
+
+    if query.status == "suspended":
+        await db.refresh(query)
+        return query
 
     background_tasks.add_task(_run_matching_bg, query.id)
 
