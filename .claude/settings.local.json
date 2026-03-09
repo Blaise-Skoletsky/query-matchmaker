@@ -3,7 +3,17 @@
     "allow": [
       "Bash(python:*)",
       "Bash(curl:*)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(alembic upgrade:*)",
+      "Bash(xargs grep:*)",
+      "Bash(claude mcp:*)",
+      "mcp__postgres__search_objects",
+      "mcp__postgres__execute_sql",
+      "Bash(git add:*)"
     ]
-  }
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "postgres"
+  ]
 }

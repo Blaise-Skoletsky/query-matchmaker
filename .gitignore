@@ -34,3 +34,10 @@ Thumbs.db
 *.db
 *.sqlite3
 CLAUDE.md
+.claude/settings.local.json
+.mcp.json
+frontend/.claude/settings.local.json
+.claude/settings.local.json
+.claude/settings.local.json
+.claude/settings.local.json
+.claude/settings.local.json
