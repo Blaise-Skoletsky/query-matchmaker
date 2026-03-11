@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, exists
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -18,17 +18,22 @@ router = APIRouter(prefix="/api/matches", tags=["matches"])
 
 
 async def _get_user_matches(db: AsyncSession, user_id: uuid.UUID) -> list[Match]:
+    # Use a subquery filter instead of JOIN so the identity map stays clean
+    # for selectinload — a JOIN + WHERE can cause selectinload to only populate
+    # the filtered MatchQuery rows, hiding the other side of each match.
+    user_match_ids = (
+        select(MatchQuery.match_id)
+        .join(Query, Query.id == MatchQuery.query_id)
+        .where(Query.user_id == user_id)
+    )
     stmt = (
         select(Match)
-        .join(MatchQuery)
-        .join(Query)
-        .where(Query.user_id == user_id)
+        .where(Match.id.in_(user_match_ids))
         .options(selectinload(Match.match_queries).selectinload(MatchQuery.query))
         .order_by(Match.created_at.desc())
-        .distinct()
     )
     result = await db.execute(stmt)
-    return list(result.scalars().unique().all())
+    return list(result.scalars().all())
 
 
 @router.get("", response_model=list[MatchResponse])

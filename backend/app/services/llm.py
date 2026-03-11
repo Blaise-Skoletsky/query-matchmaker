@@ -53,51 +53,110 @@ def _parse_json(text: str):
     return json.loads(text)
 
 
+COMPLEMENTARY_INTENTS = {"buy": ["sell"], "sell": ["buy"]}
+
+
 async def extract_metadata(raw_text: str) -> dict:
     prompt = f"""Analyze this user query and extract structured metadata. Return ONLY valid JSON, no other text.
 
 Query: "{raw_text}"
 
 Return JSON with these fields:
-- "intent": one of [buy, sell, meetup, job_seek, job_offer, housing_seek, housing_offer, service_seek, service_offer, event, other]
+- "intent": one of [buy, sell]
 - "category": a short category label (e.g. "vehicles", "electronics", "sports", "software_engineering")
 - "attributes": object with key attributes extracted from the query (e.g. {{"color": "white", "make": "Toyota"}})
 - "complementary_intents": list of intents that would match this query (e.g. a "buy" query matches ["sell"])
 - "required_match_attributes": list of attribute keys that MUST match for a good match
 - "preferred_match_attributes": list of attribute keys that are nice-to-have"""
 
-    return _parse_json(await _chat([{"role": "user", "content": prompt}]))
+    result = _parse_json(await _chat([{"role": "user", "content": prompt}]))
+
+    # Hardcode complementary intents — LLM is unreliable for this
+    result["complementary_intents"] = COMPLEMENTARY_INTENTS.get(result.get("intent"), [])
+
+    return result
+
+
+MAX_CLARIFICATIONS = 8  # safety cap only; LLM decides when it's ready
+
+
+async def _synthesize_summary(history: list[dict]) -> str:
+    prompt = (
+        "Summarize this marketplace query conversation into one clear, specific sentence "
+        "that captures everything the user wants — item/need, constraints, and any details "
+        "they provided in answers. Return ONLY the summary sentence.\n\nConversation:\n"
+        + "\n".join(
+            f"{'User' if m['role'] == 'user' else 'Assistant'}: {m['content']}"
+            for m in history
+        )
+    )
+    return (await _chat([{"role": "user", "content": prompt}], max_tokens=256)).strip()
 
 
 async def converse(history: list[dict]) -> dict:
     user_msg_count = sum(1 for m in history if m["role"] == "user")
+    must_submit = user_msg_count >= MAX_CLARIFICATIONS
 
-    system_prompt = f"""You help users create search/match queries on a marketplace platform.
+    # Build explicit list of topics already asked
+    asked = [m["content"] for m in history if m["role"] == "assistant"]
+    asked_note = ""
+    if asked:
+        items = "\n".join(f"  {i+1}. {q}" for i, q in enumerate(asked))
+        asked_note = f"\nYou have already asked:\n{items}\nDo NOT ask about any of these topics again.\n"
 
-RULES:
-1. You may ask AT MOST ONE follow-up question total. If the user has already answered a follow-up (there are {user_msg_count} user messages), you MUST submit.
-2. Never ask about something the user already mentioned.
-3. If the first message has enough context to understand what they want, submit immediately.
-4. Keep follow-ups short and specific. Ask about the single most important missing detail only.
-5. When submitting, combine ALL information from the conversation into one clear summary.
-
-Respond with ONLY valid JSON:
-- Need more info: {{"action": "ask", "message": "one short question"}}
-- Ready: {{"action": "submit", "summary": "complete query combining all details from conversation"}}"""
+    system_prompt = (
+        "You help users create precise buy/sell queries on a marketplace platform.\n\n"
+        "STRATEGY: Ask for the most product-specific details first — the attributes that differentiate "
+        "one listing from another. Generic details (condition, location, price) come AFTER you know "
+        "what the specific item/need is.\n\n"
+        "Category guides — ask the key attributes first:\n"
+        "- Electronics/devices: exact model, year, storage/specs → then condition, color, price\n"
+        "- Vehicles: make, model, year, mileage → then condition, color, price\n"
+        "- Furniture/home: item type, dimensions, material → then condition, color, price\n"
+        "- Clothing/accessories: item type, brand, size → then condition, color, price\n"
+        "- Sports/outdoor: item type, brand, size/spec → then condition, price\n"
+        "- General goods: item name, brand/model → then condition, price\n\n"
+        "RULES:\n"
+        "1. You MAY ask 2-3 closely related attributes in one question to save turns. "
+        "Example: 'What year, storage size, and color is it?' — not three separate turns.\n"
+        "2. Never ask about something the user already mentioned.\n"
+        f"3. Never repeat a topic you already asked about.{asked_note}"
+        "4. Submit as soon as you have enough specific detail for a high-quality match.\n"
+        "5. When submitting, write ONE coherent summary incorporating ALL details from the conversation in first-person (e.g. 'I want to buy...', 'I am, selling...')\n\n"
+        + ("You MUST submit now — safety limit reached.\n\n" if must_submit else "")
+        + 'Respond with ONLY valid JSON:\n'
+        '- {"action": "ask", "message": "your question(s)"}\n'
+        '- {"action": "submit", "summary": "complete query combining all details"}'
+    )
 
     messages = [{"role": "system", "content": system_prompt}] + history
 
-    if user_msg_count >= 2:
+    if must_submit:
         messages.append({
             "role": "system",
-            "content": "The user has answered your follow-up. You MUST submit now. Return {\"action\": \"submit\", \"summary\": \"...\"} combining all information."
+            "content": 'You MUST submit now. Return {"action": "submit", "summary": "..."} combining ALL conversation details.'
         })
 
-    result = _parse_json(await _chat(messages))
+    result = None
+    for attempt in range(3):
+        raw = await _chat(messages)
+        if not raw.strip():
+            continue
+        try:
+            result = _parse_json(raw)
+            break
+        except Exception:
+            continue
 
-    # Force submission if user has answered the clarification question
-    if user_msg_count >= 2 and result.get("action") != "submit":
-        summary = "\n".join(m["content"] for m in history if m["role"] == "user")
+    if result is None:
+        if must_submit or user_msg_count > 0:
+            summary = await _synthesize_summary(history)
+            return {"action": "submit", "summary": summary}
+        return {"action": "ask", "message": "Could you tell me more about what you're looking for?"}
+
+    # Forced fallback: LLM still didn't submit despite safety limit
+    if must_submit and result.get("action") != "submit":
+        summary = await _synthesize_summary(history)
         return {"action": "submit", "summary": summary}
 
     return result
@@ -113,30 +172,46 @@ async def evaluate_candidates(source_query: dict, candidates: list[dict]) -> lis
         for i, c in enumerate(candidates)
     )
 
-    prompt = f"""You are scoring compatibility between marketplace query pairs. The candidates below have already been pre-filtered to have COMPLEMENTARY intents to the source — a buyer paired with a seller, a job seeker with a job poster, a renter with a landlord, etc. Complementary intents are CORRECT and EXPECTED. Do NOT penalize a candidate because its intent differs from the source.
+    prompt = f"""You are scoring compatibility between buyer/seller pairs on a marketplace. The candidates have complementary intents (buyer paired with seller). Do NOT penalize because intents differ — that is expected.
 
-Your only job: score how well the specific subject matter and attributes align.
+Your only job: score how well the PRODUCT and attributes align.
 
 Source query:
   intent={source_query['intent']}, text="{source_query['raw_text']}", attributes={json.dumps(source_query.get('attributes', {}))}
   Required match attributes: {json.dumps(source_query.get('required_match_attributes', []))}
   Preferred match attributes: {json.dumps(source_query.get('preferred_match_attributes', []))}
 
-Candidates (each has a complementary intent to the source):
+Candidates:
 {candidate_descriptions}
 
 Return a JSON array where each element has:
-- "id": the candidate id
+- "id": the EXACT candidate id string (copy it verbatim — do NOT modify, truncate, or reformat)
 - "score": compatibility score from 0.0 to 1.0
 - "reasoning": brief explanation (1-2 sentences)
 
 Score guidelines:
-- 1.0: Same specific item/role/subject, all key attributes align (e.g. "buy MacBook Pro" + "sell MacBook Pro")
-- 0.7+: Same item/subject, most important attributes match
-- 0.4-0.7: Related but key attributes differ (e.g. "buy MacBook Pro 16-inch M3" + "sell generic MacBook" — same product family but required specifics are missing)
-- <0.4: Different item/subject entirely (e.g. "buy MacBook" + "sell iPhone")
+- 0.9-1.0: Same specific product, key attributes (model, size, specs) align
+- 0.7-0.9: Same product type, most attributes compatible
+- 0.5-0.7: Same broad category but different specific product (e.g. MacBook vs iPhone — both electronics)
+- 0.3-0.5: Related but clearly different products
+- <0.3: Completely different product categories
 
-IMPORTANT: A buyer matched with a seller for the same product is a perfect complementary pair — score it high.
-IMPORTANT: If the source query lists required match attributes and the candidate is missing or vague on those attributes, cap the score at 0.6."""
+CRITICAL RULE: If the products are from different categories entirely (e.g. food vs toys, electronics vs clothing, furniture vs vehicles), the score MUST be below 0.3. Examples:
+- "buy toys" vs "sell apples" → different categories → score < 0.3
+- "buy laptop" vs "sell cookies" → different categories → score < 0.3
+- "buy jacket" vs "sell dining table" → different categories → score < 0.3
 
-    return _parse_json(await _chat([{"role": "user", "content": prompt}], max_tokens=2048))
+IMPORTANT: A buyer matched with a seller for the SAME product is a strong pair — score it high.
+IMPORTANT: Check BOTH the raw_text AND the attributes object for attribute values.
+IMPORTANT: Only penalize for missing required attributes if the information truly cannot be found anywhere in the candidate's raw_text or attributes."""
+
+    results = _parse_json(await _chat([{"role": "user", "content": prompt}], max_tokens=2048))
+
+    # Validate: if LLM returned results without matching IDs, map by position
+    candidate_ids = {c["id"] for c in candidates}
+    returned_ids = {r.get("id") for r in results if isinstance(r, dict)}
+    if returned_ids and not returned_ids & candidate_ids and len(results) == len(candidates):
+        for i, r in enumerate(results):
+            r["id"] = candidates[i]["id"]
+
+    return results

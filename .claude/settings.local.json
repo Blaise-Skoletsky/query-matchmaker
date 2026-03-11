@@ -9,7 +9,14 @@
       "Bash(claude mcp:*)",
       "mcp__postgres__search_objects",
       "mcp__postgres__execute_sql",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(find /c/Users/Blaise/Documents/GitHub/claude-test-reinforcement/backend/app/schemas -name \"*.py\" -type f 2>/dev/null | head -20)",
+      "Bash(find /c/Users/Blaise/Documents/GitHub/claude-test-reinforcement/frontend/src/routes -name \"*.svelte\" -type f 2>/dev/null | head -10)",
+      "Bash(find /c/Users/Blaise/Documents/GitHub/claude-test-reinforcement/frontend/src/lib -name \"*.ts\" -o -name \"*.js\" 2>/dev/null | head -15)",
+      "Bash(git checkout:*)",
+      "Bash(grep -r \"complementary\" \"C:\\\\Users\\\\Blaise\\\\Documents\\\\GitHub\\\\claude-test-reinforcement\\\\backend\" --include=\"*.py\" 2>/dev/null | head -20)",
+      "Bash(grep -n \"status.*cancelled\\\\|delete_query\\\\|cleanup\" /c/Users/Blaise/Documents/GitHub/claude-test-reinforcement/backend/app/services/*.py 2>/dev/null)",
+      "Bash(grep -n \"ForeignKey\\\\|relationship\" /c/Users/Blaise/Documents/GitHub/claude-test-reinforcement/backend/app/models/*.py)"
     ]
   },
   "enableAllProjectMcpServers": true,

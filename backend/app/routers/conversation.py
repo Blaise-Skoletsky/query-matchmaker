@@ -1,6 +1,9 @@
+import logging
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends
+
+logger = logging.getLogger(__name__)
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,18 +12,14 @@ from app.models.user import User
 from app.models.query import Query
 from app.services.auth import get_current_user
 from app.services.embedding import embed_async
-from app.services.llm import converse, extract_metadata
-from app.services.matching import run_matching_pipeline
+from app.services.llm import converse, extract_metadata, _synthesize_summary, MAX_CLARIFICATIONS
+from app.services.matching import run_matching_pipeline, run_reverse_matching
 
 router = APIRouter(prefix="/api/conversation", tags=["conversation"])
 
 
 class ConversationRequest(BaseModel):
     history: list[dict]
-    location: str | None = None
-    budget: str | None = None
-    condition: str | None = None
-    urgency: str | None = None
 
 
 class ConversationResponse(BaseModel):
@@ -35,6 +34,7 @@ async def _run_matching_bg(query_id: uuid.UUID):
         query = await db.get(Query, query_id)
         if query:
             await run_matching_pipeline(db, query)
+            await run_reverse_matching(db, query)
 
 
 @router.post("", response_model=ConversationResponse)
@@ -48,10 +48,10 @@ async def chat_turn(
 
     try:
         result = await converse(body.history)
-    except Exception:
-        # If user has answered a clarification, submit anyway instead of asking again
-        if user_msg_count >= 2:
-            summary = "\n".join(m["content"] for m in body.history if m["role"] == "user")
+    except Exception as e:
+        logger.exception("converse() failed: %s", e)
+        if user_msg_count >= MAX_CLARIFICATIONS:
+            summary = await _synthesize_summary(body.history)
             result = {"action": "submit", "summary": summary}
         else:
             return ConversationResponse(
@@ -62,19 +62,6 @@ async def chat_turn(
     if result.get("action") == "submit":
         summary = result.get("summary", body.history[-1].get("content", ""))
 
-        # Enrich summary with context panel details
-        context_parts = []
-        if body.location:
-            context_parts.append(f"Location: {body.location}")
-        if body.budget:
-            context_parts.append(f"Budget/Price: {body.budget}")
-        if body.condition:
-            context_parts.append(f"Condition: {body.condition}")
-        if body.urgency:
-            context_parts.append(f"Urgency: {body.urgency}")
-        if context_parts:
-            summary = summary + "\n" + ". ".join(context_parts) + "."
-
         embedding_vec = await embed_async(summary)
         try:
             metadata = await extract_metadata(summary)
@@ -84,7 +71,6 @@ async def chat_turn(
         query = Query(
             user_id=user.id,
             raw_text=summary,
-            location=body.location,
             intent=metadata.get("intent"),
             category=metadata.get("category"),
             attributes=metadata.get("attributes"),

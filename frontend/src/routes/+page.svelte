@@ -14,13 +14,6 @@
 	let submitted = $state(false);
 	let messagesEl: HTMLDivElement;
 
-	// Context panel state
-	let showContext = $state(false);
-	let ctxLocation = $state('');
-	let ctxBudget = $state('');
-	let ctxCondition = $state<string>('');
-	let ctxUrgency = $state<string>('');
-
 	// Trace popup state
 	let showTrace = $state(false);
 	let traceQueryId = $state<string | null>(null);
@@ -47,13 +40,7 @@
 		await scrollToBottom();
 
 		try {
-			const context = {
-				location: ctxLocation || undefined,
-				budget: ctxBudget || undefined,
-				condition: ctxCondition || undefined,
-				urgency: ctxUrgency || undefined,
-			};
-			const res = await api.converse(conversationHistory(), context);
+			const res = await api.converse(conversationHistory());
 			if (res.action === 'submitted') {
 				messages = [...messages, { role: 'assistant', content: res.message || 'Query submitted! Looking for matches now.' }];
 				submitted = true;
@@ -106,11 +93,6 @@
 		trace = null;
 		tracePolling = false;
 		traceTimeout = false;
-		showContext = false;
-		ctxLocation = '';
-		ctxBudget = '';
-		ctxCondition = '';
-		ctxUrgency = '';
 	}
 
 	function stepIcon(status: string) {
@@ -312,57 +294,6 @@
 				</button>
 			</form>
 
-			<!-- Context panel -->
-			<button class="ctx-toggle" onclick={() => showContext = !showContext}>
-				<span class="ctx-toggle-icon">{showContext ? '−' : '+'}</span>
-				Add details for better matches
-				{#if ctxLocation || ctxBudget || ctxCondition || ctxUrgency}
-					<span class="ctx-dot"></span>
-				{/if}
-			</button>
-
-			{#if showContext}
-				<div class="ctx-panel">
-					<div class="ctx-row">
-						<label class="ctx-field">
-							<span class="ctx-label">Location</span>
-							<input type="text" bind:value={ctxLocation} placeholder="e.g. San Francisco, CA" />
-						</label>
-						<label class="ctx-field">
-							<span class="ctx-label">Budget / Price</span>
-							<input type="text" bind:value={ctxBudget} placeholder="e.g. $500, $200-400" />
-						</label>
-					</div>
-					<div class="ctx-row">
-						<div class="ctx-field">
-							<span class="ctx-label">Condition</span>
-							<div class="ctx-pills">
-								{#each ['New', 'Like New', 'Good', 'Fair'] as opt}
-									<button
-										type="button"
-										class="ctx-pill"
-										class:ctx-pill-active={ctxCondition === opt}
-										onclick={() => ctxCondition = ctxCondition === opt ? '' : opt}
-									>{opt}</button>
-								{/each}
-							</div>
-						</div>
-						<div class="ctx-field">
-							<span class="ctx-label">Urgency</span>
-							<div class="ctx-pills">
-								{#each ['Flexible', 'This week', 'ASAP'] as opt}
-									<button
-										type="button"
-										class="ctx-pill"
-										class:ctx-pill-active={ctxUrgency === opt}
-										onclick={() => ctxUrgency = ctxUrgency === opt ? '' : opt}
-									>{opt}</button>
-								{/each}
-							</div>
-						</div>
-					</div>
-				</div>
-			{/if}
 		{/if}
 	</div>
 {/if}
@@ -845,102 +776,6 @@
 		background: rgba(255, 255, 255, 0.04);
 	}
 	.send-btn { border-radius: 9999px; padding: 10px 24px; }
-
-	/* Context panel */
-	.ctx-toggle {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		width: 100%;
-		padding: 10px 20px;
-		background: none;
-		border: none;
-		border-top: 1px solid var(--glass-border);
-		color: var(--text-secondary);
-		font-size: 13px;
-		cursor: pointer;
-		transition: color 0.15s ease;
-	}
-	.ctx-toggle:hover { color: var(--gold-light); }
-	.ctx-toggle-icon {
-		width: 18px;
-		height: 18px;
-		border-radius: 50%;
-		background: rgba(255,255,255,0.06);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		font-size: 14px;
-		font-weight: 600;
-		flex-shrink: 0;
-	}
-	.ctx-dot {
-		width: 6px;
-		height: 6px;
-		border-radius: 50%;
-		background: var(--gold);
-		flex-shrink: 0;
-	}
-
-	.ctx-panel {
-		padding: 12px 20px 16px;
-		border-top: 1px solid var(--glass-border);
-		display: flex;
-		flex-direction: column;
-		gap: 12px;
-		background: rgba(255,255,255,0.02);
-	}
-	.ctx-row {
-		display: flex;
-		gap: 12px;
-	}
-	@media (max-width: 600px) {
-		.ctx-row { flex-direction: column; }
-	}
-	.ctx-field {
-		flex: 1;
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-	}
-	.ctx-label {
-		font-size: 11px;
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		color: var(--text-secondary);
-	}
-	.ctx-field input {
-		padding: 8px 12px;
-		border-radius: var(--radius-sm);
-		font-size: 13px;
-		background: rgba(255,255,255,0.04);
-	}
-	.ctx-pills {
-		display: flex;
-		gap: 6px;
-		flex-wrap: wrap;
-	}
-	.ctx-pill {
-		padding: 5px 12px;
-		border-radius: 9999px;
-		font-size: 12px;
-		font-weight: 500;
-		background: rgba(255,255,255,0.06);
-		border: 1px solid var(--glass-border);
-		color: var(--text-secondary);
-		cursor: pointer;
-		transition: all 0.15s ease;
-	}
-	.ctx-pill:hover {
-		border-color: rgba(167, 139, 113, 0.4);
-		color: var(--text);
-	}
-	.ctx-pill-active {
-		background: rgba(167, 139, 113, 0.15);
-		border-color: rgba(167, 139, 113, 0.5);
-		color: var(--gold-light);
-	}
 
 	.success-bar {
 		display: flex;

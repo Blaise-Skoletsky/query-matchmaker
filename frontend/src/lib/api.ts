@@ -40,10 +40,10 @@ export const api = {
 	me() {
 		return request<{ id: string; email: string; display_name: string }>('/api/auth/me');
 	},
-	converse(history: { role: string; content: string }[], context?: { location?: string; budget?: string; condition?: string; urgency?: string }) {
+	converse(history: { role: string; content: string }[]) {
 		return request<{ action: string; message: string | null; query_id: string | null }>('/api/conversation', {
 			method: 'POST',
-			body: JSON.stringify({ history, ...context })
+			body: JSON.stringify({ history })
 		});
 	},
 	listQueries() {
