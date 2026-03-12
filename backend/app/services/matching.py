@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from sqlalchemy import select, and_
@@ -10,6 +11,8 @@ from app.models.match import Match, MatchQuery
 from app.models.chat import Chatroom, ChatroomMember
 from app.services.llm import evaluate_candidates
 from app.agents.notifications import notify_match_found
+
+logger = logging.getLogger(__name__)
 
 
 async def find_candidates(db: AsyncSession, query: Query) -> list[Query]:
@@ -36,10 +39,11 @@ async def run_matching_pipeline(db: AsyncSession, query: Query):
     trace = {"status": "complete", "steps": []}
 
     # Step 1: metadata
+    query_label = query.raw_text[:60] + "…" if len(query.raw_text) > 60 else query.raw_text
     if query.intent:
         trace["steps"].append({
             "step": "metadata",
-            "label": "Query analyzed",
+            "label": query_label,
             "status": "pass",
             "intent": query.intent,
             "category": query.category,
@@ -49,7 +53,7 @@ async def run_matching_pipeline(db: AsyncSession, query: Query):
     else:
         trace["steps"].append({
             "step": "metadata",
-            "label": "Query analyzed",
+            "label": query_label,
             "status": "fail",
             "detail": "Could not extract intent from query.",
         })
@@ -114,10 +118,28 @@ async def run_matching_pipeline(db: AsyncSession, query: Query):
         return
 
     candidate_id_to_obj = {str(c.id): c for c in eval_candidates}
+
+    def _resolve_candidate(raw_id: str) -> Query | None:
+        """Look up candidate by ID, handling LLM-mangled UUIDs."""
+        obj = candidate_id_to_obj.get(raw_id)
+        if obj:
+            return obj
+        # Try normalising: strip whitespace/quotes, lowercase
+        cleaned = raw_id.strip().strip('"').strip("'").lower()
+        obj = candidate_id_to_obj.get(cleaned)
+        if obj:
+            return obj
+        # Try prefix match (LLM may truncate UUIDs)
+        for key, val in candidate_id_to_obj.items():
+            if key.startswith(cleaned) or cleaned.startswith(key):
+                return val
+        logger.warning("Could not resolve LLM-returned candidate id=%s", raw_id)
+        return None
+
     scored = [
         {
             "id": r["id"],
-            "text": candidate_id_to_obj.get(r["id"]).raw_text if candidate_id_to_obj.get(r["id"]) else "",
+            "text": (c.raw_text if (c := _resolve_candidate(r["id"])) else ""),
             "score": r.get("score", 0),
             "reasoning": r.get("reasoning", ""),
             "passed": r.get("score", 0) >= settings.match_score_threshold,
@@ -137,7 +159,7 @@ async def run_matching_pipeline(db: AsyncSession, query: Query):
     matches_created = 0
     for result in scores:
         if result.get("score", 0) >= settings.match_score_threshold:
-            candidate = candidate_id_to_obj.get(result["id"])
+            candidate = _resolve_candidate(result["id"])
             if not candidate:
                 continue
 
@@ -219,6 +241,44 @@ async def _find_partial_group_match(db: AsyncSession, candidate: Query, target_s
     )
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
+
+
+async def run_reverse_matching(db: AsyncSession, new_query: Query):
+    """Find existing queries that should match against the new query and run their pipelines."""
+    if not new_query.intent:
+        return
+
+    # Find active queries whose complementary_intents include the new query's intent
+    stmt = (
+        select(Query)
+        .where(
+            and_(
+                Query.status == "active",
+                Query.id != new_query.id,
+                Query.user_id != new_query.user_id,
+                Query.complementary_intents.contains([new_query.intent]),
+            )
+        )
+    )
+    result = await db.execute(stmt)
+    candidates = list(result.scalars().all())
+
+    for candidate in candidates:
+        # Skip if a match already exists between these two queries
+        existing = await db.execute(
+            select(Match.id)
+            .join(MatchQuery)
+            .where(MatchQuery.query_id == candidate.id)
+            .intersect(
+                select(Match.id)
+                .join(MatchQuery)
+                .where(MatchQuery.query_id == new_query.id)
+            )
+        )
+        if existing.first():
+            continue
+
+        await run_matching_pipeline(db, candidate)
 
 
 async def accept_match(db: AsyncSession, match: Match) -> Chatroom | None:

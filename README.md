@@ -1,6 +1,6 @@
 # MatchMaker
 
-A query-matching platform where users submit natural-language requests and get matched via AI. Built with a two-stage matching pipeline: vector similarity search followed by LLM-powered compatibility scoring.
+A buy/sell marketplace where users submit natural-language queries and get matched with buyers/sellers via AI. Built with a two-stage matching pipeline: vector similarity search followed by LLM-powered compatibility scoring.
 
 ## Architecture
 
@@ -28,12 +28,12 @@ A query-matching platform where users submit natural-language requests and get m
 | Backend | FastAPI (Python, async) | REST API, WebSocket, background agents |
 | Database | PostgreSQL 16 + pgvector | Storage, vector similarity search (HNSW) |
 | Embeddings | all-MiniLM-L6-v2 | 384-dim sentence embeddings |
-| LLM | Ollama (mistral) | Metadata extraction, compatibility scoring, moderation |
+| LLM | Ollama (qwen2.5:7b) | Metadata extraction, compatibility scoring, conversation, moderation |
 | Pub/Sub | Redis 7 | Real-time WebSocket message fanout |
 
 ## Two-Stage Matching Pipeline
 
-1. **Vector Pre-filter** — pgvector cosine similarity search, filtered by complementary intent (buy↔sell, job_seek↔job_offer, etc.)
+1. **Vector Pre-filter** — pgvector cosine similarity search, filtered by complementary intent (buy↔sell)
 2. **LLM Scoring** — Ollama evaluates top candidates for subject-matter compatibility (0.0–1.0), creates matches above threshold (0.7)
 
 ## Background Agents
@@ -77,7 +77,7 @@ Agent status is exposed at `GET /api/agents/status`.
 - `WS /ws/chat/{room_id}?token=...` — Real-time WebSocket chat
 
 ### Conversation
-- `POST /api/conversation` — Multi-turn guided query creation
+- `POST /api/conversation` — Agentic multi-turn query creation; LLM decides when to submit (safety cap: 8 user messages)
 
 ### Notifications
 - `GET /api/notifications` — List notifications (`?unread_only=true`)
@@ -100,11 +100,15 @@ Agent status is exposed at `GET /api/agents/status`.
 - Docker & Docker Compose
 - Python 3.11+
 - Node.js 18+
-- Ollama with `mistral` model pulled
+- Ollama with `qwen2.5:7b` model pulled (`ollama pull qwen2.5:7b`)
 
 ### Setup
 
 ```bash
+# Pull and start the LLM (one-time)
+ollama pull qwen2.5:7b
+ollama serve   # skip if Ollama is already running as a service
+
 # Start PostgreSQL + Redis
 docker compose up -d
 
@@ -129,7 +133,7 @@ Set in `backend/.env`:
 | `DATABASE_URL` | `postgresql+asyncpg://matchmaker:matchmaker@localhost:5432/matchmaker` | PostgreSQL connection |
 | `REDIS_URL` | `redis://localhost:6379` | Redis connection |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server |
-| `OLLAMA_MODEL` | `mistral` | LLM model name |
+| `OLLAMA_MODEL` | `qwen2.5:7b` | LLM model name |
 | `JWT_SECRET` | `dev-secret-change-in-production` | JWT signing key |
 | `MATCH_SCORE_THRESHOLD` | `0.7` | Minimum score to create a match |
 | `CANDIDATE_LIMIT` | `50` | Max vector search candidates |
@@ -170,4 +174,4 @@ cd backend
 pytest
 ```
 
-Tests cover LLM scoring, metadata extraction, all background agents, and the scheduler.
+Tests cover LLM scoring, metadata extraction, agentic conversation (converse/synthesize), all background agents, and the scheduler.

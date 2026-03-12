@@ -143,9 +143,6 @@ async def get_high_demand_queries(db: AsyncSession, limit: int = 5) -> list[dict
     # Find imbalances
     COMPLEMENTARY = {
         "buy": "sell", "sell": "buy",
-        "job_seek": "job_offer", "job_offer": "job_seek",
-        "housing_seek": "housing_offer", "housing_offer": "housing_seek",
-        "service_seek": "service_offer", "service_offer": "service_seek",
     }
 
     opportunities = []

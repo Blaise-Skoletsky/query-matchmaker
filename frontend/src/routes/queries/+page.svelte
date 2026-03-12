@@ -13,8 +13,10 @@
 	async function loadData() {
 		loading = true;
 		try {
-			[queries, matches] = await Promise.all([api.listQueries(), api.listMatches()]);
-		} catch { /* not logged in */ }
+			const [q, m] = await Promise.allSettled([api.listQueries(), api.listMatches()]);
+			queries = q.status === 'fulfilled' ? q.value : [];
+			matches = m.status === 'fulfilled' ? m.value : [];
+		} catch { /* unexpected */ }
 		finally { loading = false; }
 	}
 
