@@ -4,23 +4,27 @@ import logging
 import httpx
 
 from app.config import settings
+from app.services.tools import get_ollama_tools
 
 logger = logging.getLogger(__name__)
 
 
-async def _chat(messages: list[dict], max_tokens: int = 1024) -> str:
-    async with httpx.AsyncClient(timeout=120) as client:
-        response = await client.post(
-            f"{settings.ollama_base_url}/api/chat",
-            json={
-                "model": settings.ollama_model,
-                "messages": messages,
-                "stream": False,
-                "options": {"num_predict": max_tokens, "temperature": 0.3},
-            },
-        )
-        response.raise_for_status()
-        return response.json()["message"]["content"]
+async def _chat(messages: list[dict], max_tokens: int = 1024, temperature: float = 0) -> str:
+    """Send a chat request to Ollama and return the assistant message content.
+
+    Args:
+        messages: List of message dicts with "role" and "content" (e.g. user/assistant).
+        max_tokens: Maximum tokens for the model to generate.
+        temperature: Sampling temperature (0 = deterministic; use 0 for structured outputs).
+
+    Returns:
+        The assistant reply text from the model.
+
+    Raises:
+        httpx.HTTPStatusError: If the Ollama API returns a non-2xx status.
+    """
+    msg = await _chat_with_tools(messages, tools=None, max_tokens=max_tokens, temperature=temperature)
+    return msg.get("content", "")
 
 
 async def _chat_with_tools(
@@ -29,7 +33,21 @@ async def _chat_with_tools(
     max_tokens: int = 1024,
     temperature: float = 0.3,
 ) -> dict:
-    """Chat with optional native tool calling. Returns the full message dict."""
+    """Send a chat request to Ollama with optional tool definitions.
+
+    Args:
+        messages: List of message dicts (system/user/assistant/tool).
+        tools: Optional list of tool definitions (Ollama function-calling format).
+        max_tokens: Maximum tokens to generate.
+        temperature: Sampling temperature (0.0–1.0).
+
+    Returns:
+        The full message dict from the API, including "content" and optionally
+        "tool_calls" if the model requested a tool invocation.
+
+    Raises:
+        httpx.HTTPStatusError: If the Ollama API returns a non-2xx status.
+    """
     payload = {
         "model": settings.ollama_model,
         "messages": messages,
@@ -48,6 +66,20 @@ async def _chat_with_tools(
 
 
 def _parse_json(text: str):
+    """Extract and parse a single JSON object or array from free-form text.
+
+    Handles markdown code blocks (```json ... ```) and raw text containing
+    JSON. Uses the first valid outermost { } or [ ] structure found.
+
+    Args:
+        text: Raw string that may contain JSON (possibly inside markdown).
+
+    Returns:
+        Parsed JSON as a dict or list.
+
+    Raises:
+        json.JSONDecodeError: If no valid JSON is found in the text.
+    """
     text = text.strip()
     # Extract JSON from markdown code blocks anywhere in the response
     if "```" in text:
@@ -84,6 +116,16 @@ COMPLEMENTARY_INTENTS = {"buy": ["sell"], "sell": ["buy"]}
 
 
 async def extract_metadata(raw_text: str) -> dict:
+    """Extract structured metadata from a raw user query using the LLM.
+
+    Args:
+        raw_text: The user's free-form query (e.g. "I want to buy a red bike").
+
+    Returns:
+        Dict with keys: intent, category, attributes, complementary_intents,
+        required_match_attributes, preferred_match_attributes. complementary_intents
+        is overridden from COMPLEMENTARY_INTENTS (not LLM output).
+    """
     prompt = f"""Analyze this user query and extract structured metadata. Return ONLY valid JSON, no other text.
 
 Query: "{raw_text}"
@@ -107,7 +149,16 @@ Return JSON with these fields:
 MAX_CLARIFICATIONS = 5  # safety cap only; LLM decides when it's ready
 
 
-async def _synthesize_summary(history: list[dict]) -> str:
+async def synthesize_summary(history: list[dict]) -> str:
+    """Summarize a conversation into one sentence describing the user's buy/sell intent.
+
+    Args:
+        history: List of message dicts with "role" and "content".
+
+    Returns:
+        A single-sentence summary (item, attributes, intent); excludes tool results
+        and advice. Stripped of leading/trailing whitespace.
+    """
     prompt = (
         "Summarize this marketplace query conversation into one clear, specific sentence "
         "that captures ONLY what the user wants to buy or sell — the item, its attributes, "
@@ -122,6 +173,35 @@ async def _synthesize_summary(history: list[dict]) -> str:
 
 
 async def converse(history: list[dict]) -> dict:
+    """Run one turn of the buy/sell query-building conversation with optional tools.
+
+    The agent may ask a question, submit a final query, or request a tool call.
+    After MAX_CLARIFICATIONS user messages, submission is forced.
+
+    The LLM is sent: (1) a system prompt (role, rules, tool descriptions, output format),
+    (2) the conversation history. When the previous turn was a tool call, history
+    includes an assistant message with tool_calls and a tool message with the result
+    (see example below).
+
+    Args:
+        history: Conversation so far; list of dicts with "role" and "content"
+            (and "tool_calls" / tool results if applicable).
+
+    Returns:
+        One of:
+        - {"action": "ask", "message": str}
+        - {"action": "submit", "summary": str}
+        - {"action": "tool_call", "tool": str, "args": dict}
+
+    Example messages sent to the LLM (after one tool call and result):
+        [
+          {"role": "system", "content": "<long system prompt with rules and tool descriptions>"},
+          {"role": "user", "content": "I want to sell my laptop"},
+          {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "get_price_range", "arguments": {"category": "electronics", "keywords": "laptop"}}}]},
+          {"role": "tool", "content": "Found 8 similar listing(s). Price range: $400–$1,200. Most common: ~$800."},
+          {"role": "system", "content": "You just called a tool... You MUST now respond with an ASK action..."}
+        ]
+    """
     user_msg_count = sum(1 for m in history if m["role"] == "user")
     must_submit = user_msg_count >= MAX_CLARIFICATIONS
 
@@ -226,8 +306,7 @@ async def converse(history: list[dict]) -> dict:
             "role": "system",
             "content": 'You MUST submit now. Return {"action": "submit", "summary": "..."} combining ALL conversation details.'
         })
-
-    from app.services.tools import get_ollama_tools
+        
     # Detect if we're responding to a tool result — force text-only response
     last_is_tool_result = any(
         m.get("role") == "tool" for m in history[-2:]
@@ -237,7 +316,8 @@ async def converse(history: list[dict]) -> dict:
     result = None
     for attempt in range(3):
         try:
-            msg = await _chat_with_tools(messages, tools=ollama_tools)
+            # Temperature 0 for deterministic tool choice and JSON output (easier to test)
+            msg = await _chat_with_tools(messages, tools=ollama_tools, temperature=0)
         except Exception:
             continue
 
@@ -272,19 +352,31 @@ async def converse(history: list[dict]) -> dict:
 
     if result is None:
         if must_submit:
-            summary = await _synthesize_summary(history)
+            summary = await synthesize_summary(history)
             return {"action": "submit", "summary": summary}
         return {"action": "ask", "message": "Could you tell me more about what you're looking for?"}
 
     # Forced fallback: LLM still didn't submit despite safety limit
     if must_submit and result.get("action") != "submit":
-        summary = await _synthesize_summary(history)
+        summary = await synthesize_summary(history)
         return {"action": "submit", "summary": summary}
 
     return result
 
 
 async def evaluate_candidates(source_query: dict, candidates: list[dict]) -> list[dict]:
+    """Score each candidate query for compatibility with the source query using the LLM.
+
+    Args:
+        source_query: Dict with id, intent, raw_text, attributes,
+            required_match_attributes, preferred_match_attributes.
+        candidates: List of dicts with id, intent, raw_text, attributes.
+
+    Returns:
+        List of dicts with "id" (candidate id), "score" (0.0–1.0), "reasoning" (str).
+        IDs are preserved or mapped by position if the LLM returns non-matching ids.
+        Empty list if candidates is empty.
+    """
     if not candidates:
         return []
 

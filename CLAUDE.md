@@ -16,7 +16,7 @@ MatchMaker — a buy/sell marketplace where users submit natural-language querie
 ## Agentic Query Conversation
 The `converse()` function in `backend/app/services/llm.py` drives multi-turn query refinement:
 - LLM decides when it has enough context to submit (no hard message cap)
-- Safety cap: `MAX_CLARIFICATIONS = 8` user messages — forces submission via `_synthesize_summary()`
+- Safety cap: `MAX_CLARIFICATIONS = 5` user messages — forces submission via `synthesize_summary()`
 - Tracks previously asked topics and injects them into the system prompt to prevent repetition
 - No context panel on the frontend — location, budget, condition, urgency are gathered conversationally
 

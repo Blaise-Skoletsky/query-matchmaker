@@ -3,8 +3,6 @@ import logging
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends
-
-logger = logging.getLogger(__name__)
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,9 +11,11 @@ from app.models.user import User
 from app.models.query import Query
 from app.services.auth import get_current_user
 from app.services.embedding import embed_async
-from app.services.llm import converse, extract_metadata, _synthesize_summary, MAX_CLARIFICATIONS
-from app.services.matching import run_matching_pipeline, run_reverse_matching
+from app.services.llm import converse, extract_metadata, synthesize_summary, MAX_CLARIFICATIONS
+from app.services.matching import run_matching_bg
 from app.services.tools import execute_tool, check_user_queries
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/conversation", tags=["conversation"])
 
@@ -31,15 +31,6 @@ class ConversationResponse(BaseModel):
     message: str | None = None
     query_id: str | None = None
     tools_used: list[dict] | None = None
-
-
-async def _run_matching_bg(query_id: uuid.UUID):
-    from app.database import async_session
-    async with async_session() as db:
-        query = await db.get(Query, query_id)
-        if query:
-            await run_matching_pipeline(db, query)
-            await run_reverse_matching(db, query)
 
 
 @router.post("", response_model=ConversationResponse)
@@ -62,7 +53,7 @@ async def chat_turn(
         except Exception as e:
             logger.exception("converse() failed: %s", e)
             if user_msg_count >= MAX_CLARIFICATIONS:
-                summary = await _synthesize_summary(history)
+                summary = await synthesize_summary(history)
                 result = {"action": "submit", "summary": summary}
             else:
                 return ConversationResponse(
@@ -170,7 +161,7 @@ async def chat_turn(
         await db.commit()
         await db.refresh(query)
 
-        background_tasks.add_task(_run_matching_bg, query.id)
+        background_tasks.add_task(run_matching_bg, query.id)
 
         return ConversationResponse(
             action="submitted",

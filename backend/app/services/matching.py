@@ -15,7 +15,58 @@ from app.agents.notifications import notify_match_found
 logger = logging.getLogger(__name__)
 
 
+async def run_matching_bg(query_id: uuid.UUID):
+    """Background task to run matching + reverse matching for a query.
+
+    Opens its own DB session so it can be used with FastAPI BackgroundTasks.
+
+    Args:
+        query_id: Id of the Query to match.
+    """
+    from app.database import async_session
+    async with async_session() as db:
+        query = await db.get(Query, query_id)
+        if query:
+            await run_matching_pipeline(db, query)
+            await run_reverse_matching(db, query)
+
+
+async def _match_exists(db: AsyncSession, query_id_a: uuid.UUID, query_id_b: uuid.UUID) -> bool:
+    """Check if a match already exists between two queries.
+
+    Args:
+        db: Database session.
+        query_id_a: First query id.
+        query_id_b: Second query id.
+
+    Returns:
+        True if a match linking both queries exists, False otherwise.
+    """
+    existing = await db.execute(
+        select(Match.id)
+        .join(MatchQuery)
+        .where(MatchQuery.query_id == query_id_a)
+        .intersect(
+            select(Match.id)
+            .join(MatchQuery)
+            .where(MatchQuery.query_id == query_id_b)
+        )
+    )
+    return existing.first() is not None
+
+
 async def find_candidates(db: AsyncSession, query: Query) -> list[Query]:
+    """Find active queries that are complementary to the given query (e.g. sellers for a buyer).
+
+    Args:
+        db: Database session.
+        query: Source query with complementary_intents and embedding set.
+
+    Returns:
+        List of Query objects (other users, complementary intent), ordered by
+        embedding similarity, limited by settings.candidate_limit. Empty if
+        query has no complementary_intents or no embedding.
+    """
     if not query.complementary_intents or query.embedding is None:
         return []
 
@@ -36,6 +87,16 @@ async def find_candidates(db: AsyncSession, query: Query) -> list[Query]:
 
 
 async def run_matching_pipeline(db: AsyncSession, query: Query):
+    """Run the full matching pipeline for a query: metadata check, candidate search, LLM scoring, match creation.
+
+    Updates query.match_trace with step-by-step results. Creates Match records and
+    notifies users when candidates score above the threshold. Handles group matches
+    when query or candidate has group_size > 2.
+
+    Args:
+        db: Database session.
+        query: Query to run matching for (must have intent, embedding, etc. populated).
+    """
     trace = {"status": "complete", "steps": []}
 
     # Step 1: metadata
@@ -164,17 +225,7 @@ async def run_matching_pipeline(db: AsyncSession, query: Query):
                 continue
 
             # Dedup: skip if a match between these two queries already exists
-            existing = await db.execute(
-                select(Match.id)
-                .join(MatchQuery)
-                .where(MatchQuery.query_id == query.id)
-                .intersect(
-                    select(Match.id)
-                    .join(MatchQuery)
-                    .where(MatchQuery.query_id == candidate.id)
-                )
-            )
-            if existing.first():
+            if await _match_exists(db, query.id, candidate.id):
                 continue
 
             if query.group_size > 2 or candidate.group_size > 2:
@@ -208,6 +259,13 @@ async def run_matching_pipeline(db: AsyncSession, query: Query):
 
 
 async def _save_trace(db: AsyncSession, query_id: uuid.UUID, trace: dict):
+    """Persist the matching trace on the query row.
+
+    Args:
+        db: Database session.
+        query_id: Id of the Query to update.
+        trace: Dict with status and steps (written to query.match_trace).
+    """
     q = await db.get(Query, query_id)
     if q:
         q.match_trace = trace
@@ -215,6 +273,14 @@ async def _save_trace(db: AsyncSession, query_id: uuid.UUID, trace: dict):
 
 
 async def _handle_group_match(db: AsyncSession, query: Query, candidate: Query, result: dict):
+    """Create or extend a partial group match and optionally create a chatroom when full.
+
+    Args:
+        db: Database session.
+        query: Source query.
+        candidate: Matched candidate query.
+        result: LLM scoring result dict (score, reasoning).
+    """
     target_size = max(query.group_size, candidate.group_size)
 
     existing = await _find_partial_group_match(db, candidate, target_size)
@@ -242,6 +308,16 @@ async def _handle_group_match(db: AsyncSession, query: Query, candidate: Query, 
 
 
 async def _find_partial_group_match(db: AsyncSession, candidate: Query, target_size: int) -> Match | None:
+    """Find an existing partial Match that includes the candidate (for group matching).
+
+    Args:
+        db: Database session.
+        candidate: Query that must be already in the partial match.
+        target_size: Unused; kept for API clarity.
+
+    Returns:
+        The Match if found, else None.
+    """
     stmt = (
         select(Match)
         .join(MatchQuery)
@@ -258,7 +334,16 @@ async def _find_partial_group_match(db: AsyncSession, candidate: Query, target_s
 
 
 async def run_reverse_matching(db: AsyncSession, new_query: Query):
-    """Find existing queries that should match against the new query and run their pipelines."""
+    """Find existing queries that should match against the new query and run their pipelines.
+
+    For each active query whose complementary_intents include the new query's intent,
+    runs run_matching_pipeline so that the existing user can get a match to the new query.
+    Skips pairs that already have a match.
+
+    Args:
+        db: Database session.
+        new_query: The newly created/updated query to match against existing queries.
+    """
     if not new_query.intent:
         return
 
@@ -279,23 +364,22 @@ async def run_reverse_matching(db: AsyncSession, new_query: Query):
 
     for candidate in candidates:
         # Skip if a match already exists between these two queries
-        existing = await db.execute(
-            select(Match.id)
-            .join(MatchQuery)
-            .where(MatchQuery.query_id == candidate.id)
-            .intersect(
-                select(Match.id)
-                .join(MatchQuery)
-                .where(MatchQuery.query_id == new_query.id)
-            )
-        )
-        if existing.first():
+        if await _match_exists(db, candidate.id, new_query.id):
             continue
 
         await run_matching_pipeline(db, candidate)
 
 
 async def accept_match(db: AsyncSession, match: Match) -> Chatroom | None:
+    """Mark a match as accepted and create a chatroom if one does not exist.
+
+    Args:
+        db: Database session.
+        match: Match to accept (must have match_queries loadable).
+
+    Returns:
+        The created Chatroom if one was created, else None (e.g. chatroom already existed).
+    """
     match.status = "accepted"
     if not match.chatroom_id:
         chatroom = await _create_chatroom_for_match(db, match)
@@ -306,6 +390,15 @@ async def accept_match(db: AsyncSession, match: Match) -> Chatroom | None:
 
 
 async def _create_chatroom_for_match(db: AsyncSession, match: Match) -> Chatroom:
+    """Create a Chatroom for a match and link it; add ChatroomMembers for all involved users.
+
+    Args:
+        db: Database session.
+        match: Match with match_queries (and thus query ids) loaded.
+
+    Returns:
+        The new Chatroom instance (already added and flushed); match.chatroom_id is set.
+    """
     if not match.match_queries:
         await db.refresh(match, ["match_queries"])
 
@@ -332,6 +425,14 @@ async def _create_chatroom_for_match(db: AsyncSession, match: Match) -> Chatroom
 
 
 def _build_chatroom_name(query_texts: list[str]) -> str:
+    """Build a short chatroom name from the match's query texts.
+
+    Args:
+        query_texts: Raw text of each query in the match.
+
+    Returns:
+        First query text truncated to 60 chars, or "Chat" if empty.
+    """
     if not query_texts:
         return "Chat"
     combined = query_texts[0]

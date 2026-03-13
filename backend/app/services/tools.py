@@ -18,7 +18,15 @@ logger = logging.getLogger(__name__)
 
 
 def _category_filter(category: str):
-    """Build an OR filter that matches ANY word from category against category/raw_text."""
+    """Build an OR filter that matches ANY word from category against category/raw_text.
+
+    Args:
+        category: Category string (e.g. "vehicles" or "software_engineering");
+            may be split on whitespace/underscores; words shorter than 3 chars are ignored.
+
+    Returns:
+        A SQLAlchemy OR condition for Query.category and Query.raw_text ilike matches.
+    """
     words = re.split(r'[\s_]+', category.strip())
     words = [w for w in words if len(w) >= 3]  # skip tiny words like "a", "of"
     if not words:
@@ -36,7 +44,18 @@ def _category_filter(category: str):
 async def search_listings(
     db: AsyncSession, user_id: uuid.UUID, category: str, keywords: str | None = None
 ) -> str:
-    """Search active marketplace listings by category/keywords, excluding the current user."""
+    """Search active marketplace listings by category and optional keywords.
+
+    Args:
+        db: Database session.
+        user_id: Current user; their own listings are excluded.
+        category: Item category to search (e.g. "electronics", "vehicles").
+        keywords: Optional keywords; when provided, results are ordered by
+            embedding similarity to this string.
+
+    Returns:
+        Human-readable summary: count and top listing lines, or a "no listings" message.
+    """
     stmt = select(Query).where(
         and_(
             Query.status == "active",
@@ -68,7 +87,17 @@ async def search_listings(
 
 
 async def check_demand(db: AsyncSession, user_id: uuid.UUID, category: str) -> str:
-    """Check supply vs demand balance for a category."""
+    """Check supply vs demand balance for a category (buy vs sell counts).
+
+    Args:
+        db: Database session.
+        user_id: Unused; kept for consistent tool signature.
+        category: Item category to analyze.
+
+    Returns:
+        Human-readable string: buyer/seller counts and a short assessment
+        (e.g. "High demand for sellers", "Roughly balanced"), or a no-data message.
+    """
     stmt = (
         select(Query.intent, func.count(Query.id).label("count"))
         .where(
@@ -102,7 +131,18 @@ async def check_demand(db: AsyncSession, user_id: uuid.UUID, category: str) -> s
 async def get_price_range(
     db: AsyncSession, user_id: uuid.UUID, category: str, keywords: str | None = None
 ) -> str:
-    """Search active listings in a category and extract pricing data."""
+    """Search active listings in a category and extract pricing data.
+
+    Args:
+        db: Database session.
+        user_id: Unused; kept for consistent tool signature.
+        category: Item category to check.
+        keywords: Optional; when provided, listings are ordered by embedding similarity.
+
+    Returns:
+        Human-readable string with price range and typical (median) price, or
+        a message if no listings or no prices found.
+    """
     stmt = select(Query).where(
         and_(
             Query.status == "active",
@@ -154,7 +194,16 @@ async def get_price_range(
 
 
 async def count_by_category(db: AsyncSession, user_id: uuid.UUID) -> str:
-    """Return a full market overview of active listings grouped by category."""
+    """Return a full market overview of active listings grouped by category.
+
+    Args:
+        db: Database session.
+        user_id: Unused; kept for consistent tool signature.
+
+    Returns:
+        Human-readable string: "Active listings by category: cat1 (n1), cat2 (n2), ..."
+        or a no-listings message. Limited to top 10 categories by count.
+    """
     stmt = (
         select(Query.category, func.count(Query.id).label("count"))
         .where(
@@ -178,7 +227,16 @@ async def count_by_category(db: AsyncSession, user_id: uuid.UUID) -> str:
 
 
 async def check_user_queries(db: AsyncSession, user_id: uuid.UUID) -> str:
-    """List the current user's active queries."""
+    """List the current user's active queries.
+
+    Args:
+        db: Database session.
+        user_id: User whose active queries to list.
+
+    Returns:
+        Human-readable list of the user's active queries (intent + raw_text),
+        or "You have no active queries." if none.
+    """
     stmt = (
         select(Query)
         .where(
@@ -204,113 +262,97 @@ async def check_user_queries(db: AsyncSession, user_id: uuid.UUID) -> str:
 
 TOOL_REGISTRY: dict[str, dict] = {
     "search_listings": {
-        "description": "Search active marketplace listings by category/keywords. Returns count and top examples.",
-        "parameters": {"category": "string", "keywords": "string (optional)"},
+        "description": "Search active marketplace listings by category and optional keywords.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "description": "Item category to search"},
+                "keywords": {"type": "string", "description": "Optional search keywords"},
+            },
+            "required": ["category"],
+        },
         "function": search_listings,
     },
     "check_demand": {
-        "description": "Check supply vs demand balance for a category. Shows if there are more buyers or sellers.",
-        "parameters": {"category": "string"},
+        "description": "Check supply vs demand balance for a category. Shows buyer/seller counts.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "description": "Item category to check"},
+            },
+            "required": ["category"],
+        },
         "function": check_demand,
     },
     "get_price_range": {
-        "description": "Get pricing data for a category. Returns price range and typical price from active listings.",
-        "parameters": {"category": "string", "keywords": "string (optional)"},
+        "description": "Get pricing data for a category. Returns price range and typical price.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "description": "Item category to check pricing"},
+                "keywords": {"type": "string", "description": "Optional search keywords"},
+            },
+            "required": ["category"],
+        },
         "function": get_price_range,
     },
     "count_by_category": {
         "description": "Get a full market overview showing active listing counts by category.",
-        "parameters": {},
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
         "function": count_by_category,
     },
     "check_user_queries": {
-        "description": "List the current user's active queries to check for duplicates or reference existing activity.",
-        "parameters": {},
+        "description": "List the current user's active queries to check for duplicates.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
         "function": check_user_queries,
     },
 }
 
 
-OLLAMA_TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "search_listings",
-            "description": "Search active marketplace listings by category and optional keywords.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "category": {"type": "string", "description": "Item category to search"},
-                    "keywords": {"type": "string", "description": "Optional search keywords"},
-                },
-                "required": ["category"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "check_demand",
-            "description": "Check supply vs demand balance for a category. Shows buyer/seller counts.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "category": {"type": "string", "description": "Item category to check"},
-                },
-                "required": ["category"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_price_range",
-            "description": "Get pricing data for a category. Returns price range and typical price.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "category": {"type": "string", "description": "Item category to check pricing"},
-                    "keywords": {"type": "string", "description": "Optional search keywords"},
-                },
-                "required": ["category"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "count_by_category",
-            "description": "Get a full market overview showing active listing counts by category.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "check_user_queries",
-            "description": "List the current user's active queries to check for duplicates.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
-        },
-    },
-]
-
-
 def get_ollama_tools() -> list[dict]:
-    return OLLAMA_TOOLS
+    """Return the list of tool definitions in Ollama function-calling format.
+
+    Generated from TOOL_REGISTRY so definitions stay in sync automatically.
+
+    Returns:
+        List of dicts with "type": "function" and "function": {name, description, parameters}.
+    """
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": tool["description"],
+                "parameters": tool["parameters"],
+            },
+        }
+        for name, tool in TOOL_REGISTRY.items()
+    ]
 
 
 async def execute_tool(
     db: AsyncSession, user_id: uuid.UUID, tool_name: str, args: dict
 ) -> str:
-    """Look up and execute a tool from the registry."""
+    """Look up and execute a tool from the registry.
+
+    Args:
+        db: Database session passed to the tool.
+        user_id: Current user id passed to the tool.
+        tool_name: Key in TOOL_REGISTRY (e.g. "search_listings", "check_demand").
+        args: Keyword arguments for the tool (e.g. {"category": "electronics"}).
+
+    Returns:
+        The tool's result string (for the LLM), or an error message string
+        if the tool is unknown or raises an exception.
+    """
     tool = TOOL_REGISTRY.get(tool_name)
     if not tool:
         return f"Error: Unknown tool '{tool_name}'. Available tools: {', '.join(TOOL_REGISTRY.keys())}"
