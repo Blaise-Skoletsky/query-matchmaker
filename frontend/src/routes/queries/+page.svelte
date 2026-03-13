@@ -146,7 +146,7 @@
 											<p class="match-reasoning">{m.reasoning}</p>
 										{/if}
 										<div class="match-actions">
-											{#if m.status === 'pending'}
+											{#if m.status === 'pending' && q.status === 'active'}
 												<button class="btn-success btn-sm" onclick={() => accept(m.id)}>Accept</button>
 												<button class="btn-danger btn-sm" onclick={() => reject(m.id)}>Decline</button>
 											{/if}

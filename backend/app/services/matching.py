@@ -163,6 +163,20 @@ async def run_matching_pipeline(db: AsyncSession, query: Query):
             if not candidate:
                 continue
 
+            # Dedup: skip if a match between these two queries already exists
+            existing = await db.execute(
+                select(Match.id)
+                .join(MatchQuery)
+                .where(MatchQuery.query_id == query.id)
+                .intersect(
+                    select(Match.id)
+                    .join(MatchQuery)
+                    .where(MatchQuery.query_id == candidate.id)
+                )
+            )
+            if existing.first():
+                continue
+
             if query.group_size > 2 or candidate.group_size > 2:
                 await _handle_group_match(db, query, candidate, result)
             else:

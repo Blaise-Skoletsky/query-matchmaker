@@ -61,7 +61,7 @@
 	}
 
 	async function pollTrace(queryId: string, attempts = 0) {
-		if (attempts > 20) {
+		if (attempts > 10) {
 			traceTimeout = true;
 			tracePolling = false;
 			return;
@@ -73,7 +73,9 @@
 				trace = result.trace;
 				tracePolling = false;
 			} else {
-				setTimeout(() => pollTrace(queryId, attempts + 1), 1500);
+				// Exponential backoff: 2s, 4s, 6s, 8s, ... capped at 10s
+				const delay = Math.min(2000 + attempts * 2000, 10000);
+				setTimeout(() => pollTrace(queryId, attempts + 1), delay);
 			}
 		} catch {
 			tracePolling = false;
@@ -776,6 +778,8 @@
 		background: rgba(255, 255, 255, 0.04);
 	}
 	.send-btn { border-radius: 9999px; padding: 10px 24px; }
+
+
 
 	.success-bar {
 		display: flex;

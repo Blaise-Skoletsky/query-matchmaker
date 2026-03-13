@@ -28,7 +28,7 @@ async def _get_user_matches(db: AsyncSession, user_id: uuid.UUID) -> list[Match]
     )
     stmt = (
         select(Match)
-        .where(Match.id.in_(user_match_ids))
+        .where(Match.id.in_(user_match_ids), Match.status != "cancelled")
         .options(selectinload(Match.match_queries).selectinload(MatchQuery.query))
         .order_by(Match.created_at.desc())
     )
@@ -63,6 +63,10 @@ async def accept(
     user_query_ids = {mq.query.id for mq in match.match_queries if mq.query.user_id == user.id}
     if not user_query_ids:
         raise HTTPException(status_code=403, detail="Not your match")
+
+    user_queries = [mq.query for mq in match.match_queries if mq.query.user_id == user.id]
+    if any(q.status == "cancelled" for q in user_queries):
+        raise HTTPException(status_code=400, detail="Cannot accept a match from a deleted query")
 
     chatroom = await accept_match(db, match)
     await db.refresh(match, ["match_queries"])
@@ -99,6 +103,10 @@ async def reject(
     user_query_ids = {mq.query.id for mq in match.match_queries if mq.query.user_id == user.id}
     if not user_query_ids:
         raise HTTPException(status_code=403, detail="Not your match")
+
+    user_queries = [mq.query for mq in match.match_queries if mq.query.user_id == user.id]
+    if any(q.status == "cancelled" for q in user_queries):
+        raise HTTPException(status_code=400, detail="Cannot reject a match from a deleted query")
 
     match.status = "rejected"
 
