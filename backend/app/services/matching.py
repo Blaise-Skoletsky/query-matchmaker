@@ -3,8 +3,6 @@ import uuid
 
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-
 from app.config import settings
 from app.models.query import Query
 from app.models.match import Match, MatchQuery
@@ -90,8 +88,7 @@ async def run_matching_pipeline(db: AsyncSession, query: Query):
     """Run the full matching pipeline for a query: metadata check, candidate search, LLM scoring, match creation.
 
     Updates query.match_trace with step-by-step results. Creates Match records and
-    notifies users when candidates score above the threshold. Handles group matches
-    when query or candidate has group_size > 2.
+    notifies users when candidates score above the threshold.
 
     Args:
         db: Database session.
@@ -228,23 +225,20 @@ async def run_matching_pipeline(db: AsyncSession, query: Query):
             if await _match_exists(db, query.id, candidate.id):
                 continue
 
-            if query.group_size > 2 or candidate.group_size > 2:
-                await _handle_group_match(db, query, candidate, result)
-            else:
-                match = Match(
-                    compatibility_score=result["score"],
-                    reasoning=result.get("reasoning"),
-                )
-                db.add(match)
-                await db.flush()
-                db.add(MatchQuery(match_id=match.id, query_id=query.id))
-                db.add(MatchQuery(match_id=match.id, query_id=candidate.id))
+            match = Match(
+                compatibility_score=result["score"],
+                reasoning=result.get("reasoning"),
+            )
+            db.add(match)
+            await db.flush()
+            db.add(MatchQuery(match_id=match.id, query_id=query.id))
+            db.add(MatchQuery(match_id=match.id, query_id=candidate.id))
 
-                # Notify both users
-                await notify_match_found(db, query.user_id, match.id, candidate.raw_text, result["score"])
-                await notify_match_found(db, candidate.user_id, match.id, query.raw_text, result["score"])
+            # Notify both users
+            await notify_match_found(db, query.user_id, match.id, candidate.raw_text, result["score"])
+            await notify_match_found(db, candidate.user_id, match.id, query.raw_text, result["score"])
 
-                await db.commit()
+            await db.commit()
             matches_created += 1
 
     trace["steps"].append({
@@ -270,67 +264,6 @@ async def _save_trace(db: AsyncSession, query_id: uuid.UUID, trace: dict):
     if q:
         q.match_trace = trace
         await db.commit()
-
-
-async def _handle_group_match(db: AsyncSession, query: Query, candidate: Query, result: dict):
-    """Create or extend a partial group match and optionally create a chatroom when full.
-
-    Args:
-        db: Database session.
-        query: Source query.
-        candidate: Matched candidate query.
-        result: LLM scoring result dict (score, reasoning).
-    """
-    target_size = max(query.group_size, candidate.group_size)
-
-    existing = await _find_partial_group_match(db, candidate, target_size)
-
-    if existing:
-        db.add(MatchQuery(match_id=existing.id, query_id=query.id))
-        await db.flush()
-
-        member_count = len(existing.match_queries) + 1
-        if member_count >= target_size:
-            existing.status = "pending"
-            await _create_chatroom_for_match(db, existing)
-        await db.commit()
-    else:
-        match = Match(
-            compatibility_score=result["score"],
-            reasoning=result.get("reasoning"),
-            status="partial",
-        )
-        db.add(match)
-        await db.flush()
-        db.add(MatchQuery(match_id=match.id, query_id=query.id))
-        db.add(MatchQuery(match_id=match.id, query_id=candidate.id))
-        await db.commit()
-
-
-async def _find_partial_group_match(db: AsyncSession, candidate: Query, target_size: int) -> Match | None:
-    """Find an existing partial Match that includes the candidate (for group matching).
-
-    Args:
-        db: Database session.
-        candidate: Query that must be already in the partial match.
-        target_size: Unused; kept for API clarity.
-
-    Returns:
-        The Match if found, else None.
-    """
-    stmt = (
-        select(Match)
-        .join(MatchQuery)
-        .where(
-            and_(
-                MatchQuery.query_id == candidate.id,
-                Match.status == "partial",
-            )
-        )
-        .options(selectinload(Match.match_queries))
-    )
-    result = await db.execute(stmt)
-    return result.scalar_one_or_none()
 
 
 async def run_reverse_matching(db: AsyncSession, new_query: Query):

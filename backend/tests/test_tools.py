@@ -8,7 +8,7 @@ import pytest
 from app.services.tools import (
     execute_tool, search_listings, check_demand,
     get_price_range, count_by_category, check_user_queries,
-    TOOL_REGISTRY, OLLAMA_TOOLS, get_ollama_tools,
+    TOOL_REGISTRY, get_ollama_tools,
     _category_filter,
 )
 from app.routers.conversation import MAX_TOOL_CALLS
@@ -314,8 +314,8 @@ def test_get_ollama_tools_format():
 
 
 def test_get_ollama_tools_matches_registry():
-    """Every TOOL_REGISTRY key has a corresponding OLLAMA_TOOLS entry."""
-    ollama_names = {t["function"]["name"] for t in OLLAMA_TOOLS}
+    """Every TOOL_REGISTRY key has a corresponding get_ollama_tools() entry."""
+    ollama_names = {t["function"]["name"] for t in get_ollama_tools()}
     registry_names = set(TOOL_REGISTRY.keys())
     assert ollama_names == registry_names
 

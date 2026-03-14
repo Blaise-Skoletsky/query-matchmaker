@@ -155,7 +155,6 @@ async def chat_turn(
             required_match_attributes=metadata.get("required_match_attributes"),
             preferred_match_attributes=metadata.get("preferred_match_attributes"),
             embedding=embedding_vec,
-            group_size=2,
         )
         db.add(query)
         await db.commit()

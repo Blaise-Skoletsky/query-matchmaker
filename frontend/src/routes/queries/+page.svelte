@@ -119,8 +119,7 @@
 					<div class="query-body">
 						<div class="meta-row">
 							{#if q.category}<span class="meta-tag">{q.category}</span>{/if}
-							{#if q.group_size > 2}<span class="meta-tag">Group of {q.group_size}</span>{/if}
-							<span class="time">{timeAgo(q.created_at)}</span>
+<span class="time">{timeAgo(q.created_at)}</span>
 						</div>
 
 						{#if qMatches.length > 0}

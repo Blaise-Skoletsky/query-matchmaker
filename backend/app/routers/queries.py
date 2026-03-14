@@ -45,7 +45,7 @@ async def create_query(
         latitude=body.latitude,
         longitude=body.longitude,
         embedding=embedding,
-        group_size=body.group_size,
+
     )
     db.add(query)
     await db.commit()

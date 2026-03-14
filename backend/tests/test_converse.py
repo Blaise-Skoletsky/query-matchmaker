@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.services.llm import MAX_CLARIFICATIONS, _synthesize_summary, converse
+from app.services.llm import MAX_CLARIFICATIONS, synthesize_summary, converse
 
 
 @pytest.mark.asyncio
@@ -46,6 +46,6 @@ async def test_synthesize_summary_incorporates_answers():
 
     expected_summary = "Looking to buy a road bicycle for around $300."
     with patch("app.services.llm._chat", new=AsyncMock(return_value=expected_summary)):
-        result = await _synthesize_summary(history)
+        result = await synthesize_summary(history)
 
     assert "bicycle" in result.lower() or "road" in result.lower() or "300" in result
