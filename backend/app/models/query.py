@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import String, DateTime, Integer, Float, Text, ForeignKey, func
+from sqlalchemy import String, DateTime, Float, Text, ForeignKey, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -25,7 +25,7 @@ class Query(Base):
     latitude: Mapped[float | None] = mapped_column(Float)
     longitude: Mapped[float | None] = mapped_column(Float)
     embedding = mapped_column(Vector(384))
-    group_size: Mapped[int] = mapped_column(Integer, default=2)
+
     status: Mapped[str] = mapped_column(String(20), default="active")
     match_trace: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

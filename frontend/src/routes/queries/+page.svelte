@@ -119,8 +119,7 @@
 					<div class="query-body">
 						<div class="meta-row">
 							{#if q.category}<span class="meta-tag">{q.category}</span>{/if}
-							{#if q.group_size > 2}<span class="meta-tag">Group of {q.group_size}</span>{/if}
-							<span class="time">{timeAgo(q.created_at)}</span>
+<span class="time">{timeAgo(q.created_at)}</span>
 						</div>
 
 						{#if qMatches.length > 0}
@@ -146,7 +145,7 @@
 											<p class="match-reasoning">{m.reasoning}</p>
 										{/if}
 										<div class="match-actions">
-											{#if m.status === 'pending'}
+											{#if m.status === 'pending' && q.status === 'active'}
 												<button class="btn-success btn-sm" onclick={() => accept(m.id)}>Accept</button>
 												<button class="btn-danger btn-sm" onclick={() => reject(m.id)}>Decline</button>
 											{/if}

@@ -5,8 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.services.embedding import load_model
-from app.routers import auth, queries, matches, chat, conversation, notifications, recommendations
-from app.routers import analytics_router
+from app.routers import auth, queries, matches, chat, conversation, notifications
 from app.ws.manager import manager
 from app.agents.scheduler import create_default_scheduler
 
@@ -45,8 +44,6 @@ app.include_router(matches.router)
 app.include_router(chat.router)
 app.include_router(conversation.router)
 app.include_router(notifications.router)
-app.include_router(analytics_router.router)
-app.include_router(recommendations.router)
 
 
 @app.get("/api/health")

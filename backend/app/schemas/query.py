@@ -9,7 +9,6 @@ class QueryCreate(BaseModel):
     location: str | None = None
     latitude: float | None = None
     longitude: float | None = None
-    group_size: int = 2
 
 
 class QueryResponse(BaseModel):
@@ -20,7 +19,6 @@ class QueryResponse(BaseModel):
     attributes: dict | None
     complementary_intents: list | None
     location: str | None
-    group_size: int
     status: str
     created_at: datetime
 

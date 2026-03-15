@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, exists
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -28,12 +28,46 @@ async def _get_user_matches(db: AsyncSession, user_id: uuid.UUID) -> list[Match]
     )
     stmt = (
         select(Match)
-        .where(Match.id.in_(user_match_ids))
+        .where(Match.id.in_(user_match_ids), Match.status != "cancelled")
         .options(selectinload(Match.match_queries).selectinload(MatchQuery.query))
         .order_by(Match.created_at.desc())
     )
     result = await db.execute(stmt)
     return list(result.scalars().all())
+
+
+async def _load_match_for_user(db: AsyncSession, match_id: uuid.UUID, user: User) -> Match:
+    """Load a match by id, verify the user is a participant, and check for cancelled queries.
+
+    Args:
+        db: Database session.
+        match_id: Match to load.
+        user: Authenticated user.
+
+    Returns:
+        The loaded Match with match_queries eagerly loaded.
+
+    Raises:
+        HTTPException: 404 if not found, 403 if not the user's match,
+            400 if the user's query in the match is cancelled.
+    """
+    stmt = (
+        select(Match)
+        .options(selectinload(Match.match_queries).selectinload(MatchQuery.query))
+        .where(Match.id == match_id)
+    )
+    result = await db.execute(stmt)
+    match = result.scalar_one_or_none()
+    if not match:
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    user_queries = [mq.query for mq in match.match_queries if mq.query.user_id == user.id]
+    if not user_queries:
+        raise HTTPException(status_code=403, detail="Not your match")
+    if any(q.status == "cancelled" for q in user_queries):
+        raise HTTPException(status_code=400, detail="Cannot act on a match from a deleted query")
+
+    return match
 
 
 @router.get("", response_model=list[MatchResponse])
@@ -50,20 +84,7 @@ async def accept(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    stmt = (
-        select(Match)
-        .options(selectinload(Match.match_queries).selectinload(MatchQuery.query))
-        .where(Match.id == match_id)
-    )
-    result = await db.execute(stmt)
-    match = result.scalar_one_or_none()
-    if not match:
-        raise HTTPException(status_code=404, detail="Match not found")
-
-    user_query_ids = {mq.query.id for mq in match.match_queries if mq.query.user_id == user.id}
-    if not user_query_ids:
-        raise HTTPException(status_code=403, detail="Not your match")
-
+    match = await _load_match_for_user(db, match_id, user)
     chatroom = await accept_match(db, match)
     await db.refresh(match, ["match_queries"])
 
@@ -86,20 +107,7 @@ async def reject(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    stmt = (
-        select(Match)
-        .options(selectinload(Match.match_queries).selectinload(MatchQuery.query))
-        .where(Match.id == match_id)
-    )
-    result = await db.execute(stmt)
-    match = result.scalar_one_or_none()
-    if not match:
-        raise HTTPException(status_code=404, detail="Match not found")
-
-    user_query_ids = {mq.query.id for mq in match.match_queries if mq.query.user_id == user.id}
-    if not user_query_ids:
-        raise HTTPException(status_code=403, detail="Not your match")
-
+    match = await _load_match_for_user(db, match_id, user)
     match.status = "rejected"
 
     # Notify other users

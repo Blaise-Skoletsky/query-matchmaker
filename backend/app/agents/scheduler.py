@@ -78,13 +78,12 @@ class AgentScheduler:
 
 def create_default_scheduler() -> AgentScheduler:
     """Create the scheduler with all default agents registered."""
-    from app.agents import expiration, reprocessing, moderation, analytics
+    from app.agents import expiration, reprocessing, moderation
 
     scheduler = AgentScheduler()
 
     scheduler.register("query_expiration", expiration.run, interval_seconds=300)       # 5 min
     scheduler.register("match_reprocessing", reprocessing.run, interval_seconds=120)   # 2 min
     scheduler.register("content_moderation", moderation.sweep_unmoderated, interval_seconds=60)  # 1 min
-    scheduler.register("analytics_snapshot", analytics.run, interval_seconds=3600)     # 1 hour
 
     return scheduler

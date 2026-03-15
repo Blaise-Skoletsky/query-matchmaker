@@ -12,19 +12,10 @@ from app.schemas.query import QueryCreate, QueryResponse
 from app.services.auth import get_current_user
 from app.services.embedding import embed_async
 from app.services.llm import extract_metadata
-from app.services.matching import run_matching_pipeline, run_reverse_matching
+from app.services.matching import run_matching_bg
 from app.agents.moderation import moderate_query
 
 router = APIRouter(prefix="/api/queries", tags=["queries"])
-
-
-async def _run_matching_bg(query_id: uuid.UUID):
-    from app.database import async_session
-    async with async_session() as db:
-        query = await db.get(Query, query_id)
-        if query:
-            await run_matching_pipeline(db, query)
-            await run_reverse_matching(db, query)
 
 
 @router.post("", response_model=QueryResponse, status_code=status.HTTP_201_CREATED)
@@ -54,7 +45,7 @@ async def create_query(
         latitude=body.latitude,
         longitude=body.longitude,
         embedding=embedding,
-        group_size=body.group_size,
+
     )
     db.add(query)
     await db.commit()
@@ -68,7 +59,7 @@ async def create_query(
         await db.refresh(query)
         return query
 
-    background_tasks.add_task(_run_matching_bg, query.id)
+    background_tasks.add_task(run_matching_bg, query.id)
 
     return query
 

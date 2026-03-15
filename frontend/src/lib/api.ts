@@ -41,7 +41,12 @@ export const api = {
 		return request<{ id: string; email: string; display_name: string }>('/api/auth/me');
 	},
 	converse(history: { role: string; content: string }[]) {
-		return request<{ action: string; message: string | null; query_id: string | null }>('/api/conversation', {
+		return request<{
+			action: string;
+			message: string | null;
+			query_id: string | null;
+			tools_used: { tool: string; args: Record<string, string>; result: string }[] | null;
+		}>('/api/conversation', {
 			method: 'POST',
 			body: JSON.stringify({ history })
 		});
@@ -87,25 +92,6 @@ export const api = {
 	},
 	markAllNotificationsRead() {
 		return request<void>('/api/notifications/read-all', { method: 'POST' });
-	},
-
-	// Recommendations
-	getSimilarQueries(limit = 5) {
-		return request<any[]>(`/api/recommendations/similar?limit=${limit}`);
-	},
-	getTrending(limit = 10) {
-		return request<any[]>(`/api/recommendations/trending?limit=${limit}`);
-	},
-	getDemandGaps(limit = 5) {
-		return request<any[]>(`/api/recommendations/demand-gaps?limit=${limit}`);
-	},
-
-	// Analytics
-	getAnalyticsLatest() {
-		return request<any>('/api/analytics/latest');
-	},
-	getAnalyticsSnapshots(limit = 30) {
-		return request<any[]>(`/api/analytics/snapshots?limit=${limit}`);
 	},
 
 	// Agent status

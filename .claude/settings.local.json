@@ -16,7 +16,10 @@
       "Bash(git checkout:*)",
       "Bash(grep -r \"complementary\" \"C:\\\\Users\\\\Blaise\\\\Documents\\\\GitHub\\\\claude-test-reinforcement\\\\backend\" --include=\"*.py\" 2>/dev/null | head -20)",
       "Bash(grep -n \"status.*cancelled\\\\|delete_query\\\\|cleanup\" /c/Users/Blaise/Documents/GitHub/claude-test-reinforcement/backend/app/services/*.py 2>/dev/null)",
-      "Bash(grep -n \"ForeignKey\\\\|relationship\" /c/Users/Blaise/Documents/GitHub/claude-test-reinforcement/backend/app/models/*.py)"
+      "Bash(grep -n \"ForeignKey\\\\|relationship\" /c/Users/Blaise/Documents/GitHub/claude-test-reinforcement/backend/app/models/*.py)",
+      "Bash(git log:*)",
+      "WebSearch",
+      "WebFetch(domain:docs.ollama.com)"
     ]
   },
   "enableAllProjectMcpServers": true,
