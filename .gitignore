@@ -14,7 +14,8 @@ env/
 # Node
 node_modules/
 .svelte-kit/
-build/
+
+# Environment
 .env
 .env.*
 !.env.example
@@ -30,14 +31,10 @@ build/
 .DS_Store
 Thumbs.db
 
-# Project
-*.db
-*.sqlite3
-CLAUDE.md
+# Benchmarks (keep .gitkeep, ignore result files)
+**/benchmarks/*.json
+!**/benchmarks/.gitkeep
+
+# Claude local settings
 .claude/settings.local.json
 .mcp.json
-frontend/.claude/settings.local.json
-.claude/settings.local.json
-.claude/settings.local.json
-.claude/settings.local.json
-.claude/settings.local.json

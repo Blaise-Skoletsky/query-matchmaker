@@ -77,7 +77,7 @@ Agent status is exposed at `GET /api/agents/status`.
 - `WS /ws/chat/{room_id}?token=...` — Real-time WebSocket chat
 
 ### Conversation
-- `POST /api/conversation` — Agentic multi-turn query creation; LLM decides when to submit (safety cap: 8 user messages)
+- `POST /api/conversation` — Agentic multi-turn query creation; LLM decides when to submit (safety cap: 5 user messages)
 
 ### Notifications
 - `GET /api/notifications` — List notifications (`?unread_only=true`)
@@ -171,7 +171,28 @@ frontend/
 
 ```bash
 cd backend
-pytest
+
+# Install dev dependencies (includes eval metrics)
+pip install -e ".[dev]"
+python -c "import nltk; nltk.download('punkt_tab')"
+
+# Unit + scenario + eval tests (fast, no Ollama needed)
+pytest -m "not integration" -v
+
+# Full suite including integration (requires Ollama running)
+pytest -v
+
+# With coverage report
+pytest -m "not integration" --cov=app --cov-report=term-missing
 ```
 
-Tests cover LLM scoring, metadata extraction, agentic conversation (converse/synthesize), all background agents, and the scheduler.
+### Test Categories
+
+| Category | Directory | Description |
+|----------|-----------|-------------|
+| Unit | `tests/unit/` | Fast, fully mocked — all services, agents, helpers |
+| Scenarios | `tests/scenarios/` | Data-driven conversation flows (mocked LLM) |
+| Eval | `tests/eval/` | LLM quality metrics (ROUGE, BLEU, semantic similarity) |
+| Integration | `tests/integration/` | Requires running Ollama (`@pytest.mark.integration`) |
+| API | `tests/api/` | FastAPI TestClient endpoint tests |
+| Agents | `tests/test_agents.py` | Background agent scheduling, expiration, notifications |
