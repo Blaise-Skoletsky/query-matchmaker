@@ -19,7 +19,14 @@
       "Bash(grep -n \"ForeignKey\\\\|relationship\" /c/Users/Blaise/Documents/GitHub/claude-test-reinforcement/backend/app/models/*.py)",
       "Bash(git log:*)",
       "WebSearch",
-      "WebFetch(domain:docs.ollama.com)"
+      "WebFetch(domain:docs.ollama.com)",
+      "Bash(cd:*)",
+      "Bash(pip install:*)",
+      "Bash(pytest:*)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(mkdir:*)",
+      "Bash(git check-ignore:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

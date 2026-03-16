@@ -7,7 +7,7 @@ MatchMaker — a buy/sell marketplace where users submit natural-language querie
 - **Backend**: FastAPI (Python, async) on port 8000
 - **Database**: PostgreSQL 16 + pgvector (Docker)
 - **Embeddings**: all-MiniLM-L6-v2 (sentence-transformers, 384-dim)
-- **LLM**: Ollama (local, free — default model: qwen2.5:14b)
+- **LLM**: Ollama (local, free — default model: qwen2.5:7b)
 
 ## Two-Stage Matching Pipeline
 1. **Stage 1**: Vector similarity search pre-filtered by complementary intent (pgvector)
@@ -44,7 +44,7 @@ cd backend && pytest
 Set in `backend/.env`:
 - `DATABASE_URL` — PostgreSQL connection (default: postgresql+asyncpg://matchmaker:matchmaker@localhost:5432/matchmaker)
 - `OLLAMA_BASE_URL` — Ollama server (default: http://localhost:11434)
-- `OLLAMA_MODEL` — Ollama model name (default: qwen2.5:14b)
+- `OLLAMA_MODEL` — Ollama model name (default: qwen2.5:7b)
 - `JWT_SECRET` — JWT signing secret
 
 ## Project Structure
@@ -55,7 +55,16 @@ Set in `backend/.env`:
 - `frontend/src/routes/` — SvelteKit pages
 - `frontend/src/lib/` — API client, WebSocket client, stores
 
+## Testing
+- **Unit tests** (`tests/unit/`): Fast, fully mocked — run with `pytest -m "not integration"`
+- **Scenarios** (`tests/scenarios/`): Data-driven conversation flows via `scenario_harness.py`
+- **Eval** (`tests/eval/`): ROUGE-L, BLEU, semantic similarity metrics for LLM outputs
+- **Integration** (`tests/integration/`): Requires Ollama; marked `@pytest.mark.integration`
+- **API** (`tests/api/`): FastAPI TestClient with dependency overrides
+- Always mock LLM calls (`_chat`, `_chat_with_tools`) in unit tests
+- For LLM-facing functions, add eval metrics to `tests/eval/golden_datasets.py`
+
 ## Coding Practices
  - Don't be uncessearily verbose.
  - Ask clarifying questions
- - When you add new features, create tests. Don't create unncesseary tests. 
+ - When you add new features, create tests. Don't create unncesseary tests.

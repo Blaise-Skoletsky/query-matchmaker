@@ -1,4 +1,7 @@
-"""Tests for the background agents."""
+"""Tests for the background agents (expiration, notifications, scheduler).
+
+Moderation tests have been moved to unit/test_moderation.py.
+"""
 import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch, MagicMock
@@ -17,7 +20,6 @@ class TestExpirationAgent:
 
     @pytest.mark.asyncio
     async def test_expires_queries_past_explicit_deadline(self):
-        """Queries with expires_at in the past should be marked expired."""
         from app.agents import expiration
 
         mock_session = AsyncMock()
@@ -39,7 +41,6 @@ class TestExpirationAgent:
 
     @pytest.mark.asyncio
     async def test_expires_aged_queries(self):
-        """Queries older than max_age_days with no explicit expiry should expire."""
         from app.agents import expiration
 
         mock_session = AsyncMock()
@@ -61,7 +62,6 @@ class TestExpirationAgent:
 
     @pytest.mark.asyncio
     async def test_no_expired_queries(self):
-        """When no queries need expiring, returns 0."""
         from app.agents import expiration
 
         mock_session = AsyncMock()
@@ -160,93 +160,6 @@ class TestNotificationAgent:
 
 
 # ---------------------------------------------------------------------------
-# Moderation Agent
-# ---------------------------------------------------------------------------
-
-class TestModerationAgent:
-    """Tests for content moderation."""
-
-    @pytest.mark.asyncio
-    async def test_moderate_safe_query(self):
-        from app.agents.moderation import moderate_query
-
-        mock_db = AsyncMock()
-        mock_query = MagicMock()
-        mock_query.id = uuid.uuid4()
-        mock_query.user_id = uuid.uuid4()
-        mock_query.raw_text = "Looking to buy a used bicycle in good condition"
-        mock_query.status = "active"
-
-        llm_response = '{"flagged": false, "category": "safe", "confidence": 0.95, "reason": "Normal marketplace query"}'
-
-        with patch("app.agents.moderation._chat", new_callable=AsyncMock, return_value=llm_response):
-            log = await moderate_query(mock_db, mock_query)
-
-        assert log.flagged is False
-        assert log.category == "safe"
-        assert mock_query.status == "active"
-
-    @pytest.mark.asyncio
-    async def test_moderate_flagged_query(self):
-        from app.agents.moderation import moderate_query
-
-        mock_db = AsyncMock()
-        mock_query = MagicMock()
-        mock_query.id = uuid.uuid4()
-        mock_query.user_id = uuid.uuid4()
-        mock_query.raw_text = "Selling illegal substances"
-        mock_query.status = "active"
-
-        llm_response = '{"flagged": true, "category": "illegal", "confidence": 0.95, "reason": "References illegal goods"}'
-
-        with patch("app.agents.moderation._chat", new_callable=AsyncMock, return_value=llm_response):
-            log = await moderate_query(mock_db, mock_query)
-
-        assert log.flagged is True
-        assert log.auto_action == "suspended"
-        assert mock_query.status == "suspended"
-
-    @pytest.mark.asyncio
-    async def test_moderate_low_confidence_not_suspended(self):
-        """Flagged but low confidence should not auto-suspend."""
-        from app.agents.moderation import moderate_query
-
-        mock_db = AsyncMock()
-        mock_query = MagicMock()
-        mock_query.id = uuid.uuid4()
-        mock_query.user_id = uuid.uuid4()
-        mock_query.raw_text = "Selling kitchen knives"
-        mock_query.status = "active"
-
-        llm_response = '{"flagged": true, "category": "illegal", "confidence": 0.4, "reason": "Mentions knives"}'
-
-        with patch("app.agents.moderation._chat", new_callable=AsyncMock, return_value=llm_response):
-            log = await moderate_query(mock_db, mock_query)
-
-        assert log.flagged is True
-        assert log.auto_action == "none"
-        assert mock_query.status == "active"  # Not suspended due to low confidence
-
-    @pytest.mark.asyncio
-    async def test_moderate_llm_failure_graceful(self):
-        """When LLM call fails, should not flag the query."""
-        from app.agents.moderation import moderate_query
-
-        mock_db = AsyncMock()
-        mock_query = MagicMock()
-        mock_query.id = uuid.uuid4()
-        mock_query.user_id = uuid.uuid4()
-        mock_query.raw_text = "Buying a laptop"
-        mock_query.status = "active"
-
-        with patch("app.agents.moderation._chat", new_callable=AsyncMock, side_effect=Exception("LLM down")):
-            log = await moderate_query(mock_db, mock_query)
-
-        assert log.flagged is False
-        assert mock_query.status == "active"
-
-
-# ---------------------------------------------------------------------------
 # Scheduler
 # ---------------------------------------------------------------------------
 
@@ -278,7 +191,4 @@ class TestScheduler:
         assert status[0]["running"] is True
 
         await scheduler.stop()
-        # After stop, task should be cancelled
         assert scheduler._agents[0].task.cancelled() or scheduler._agents[0].task.done()
-
-
