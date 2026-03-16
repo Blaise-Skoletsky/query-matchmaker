@@ -7,7 +7,7 @@ MatchMaker — a buy/sell marketplace where users submit natural-language querie
 - **Backend**: FastAPI (Python, async) on port 8000
 - **Database**: PostgreSQL 16 + pgvector (Docker)
 - **Embeddings**: all-MiniLM-L6-v2 (sentence-transformers, 384-dim)
-- **LLM**: Ollama (local, free — default model: qwen2.5:7b)
+- **LLM**: Ollama (local, free — default model: qwen2.5:14b)
 
 ## Two-Stage Matching Pipeline
 1. **Stage 1**: Vector similarity search pre-filtered by complementary intent (pgvector)
@@ -44,7 +44,7 @@ cd backend && pytest
 Set in `backend/.env`:
 - `DATABASE_URL` — PostgreSQL connection (default: postgresql+asyncpg://matchmaker:matchmaker@localhost:5432/matchmaker)
 - `OLLAMA_BASE_URL` — Ollama server (default: http://localhost:11434)
-- `OLLAMA_MODEL` — Ollama model name (default: qwen2.5:7b)
+- `OLLAMA_MODEL` — Ollama model name (default: qwen2.5:14b)
 - `JWT_SECRET` — JWT signing secret
 
 ## Project Structure

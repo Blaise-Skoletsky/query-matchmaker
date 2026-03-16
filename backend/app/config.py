@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 1440
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "qwen2.5:7b"
+    ollama_model: str = "qwen2.5:14b"
     embedding_model: str = "all-MiniLM-L6-v2"
     redis_url: str = "redis://localhost:6379"
     match_score_threshold: float = 0.7
